@@ -12,6 +12,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import { getAuthToken } from "./auth.js";
 import { LlamaCpp } from "./llm.js";
 import type {
   EmbedOptions,
@@ -50,7 +51,7 @@ export async function startRemoteServer(options: {
 } = {}): Promise<void> {
   const port = options.port ?? 8282;
   const host = options.host ?? "0.0.0.0";
-  const authToken = options.authToken ?? process.env.QMD_AUTH_TOKEN;
+  const authToken = options.authToken ?? getAuthToken();
 
   const llm = new LlamaCpp();
 

@@ -71,6 +71,7 @@ import {
   getDefaultDbPath,
 } from "./store.js";
 import { disposeDefaultLlamaCpp, getDefaultLlamaCpp, isRemoteMode, withLLMSession, pullModels, DEFAULT_EMBED_MODEL_URI, DEFAULT_GENERATE_MODEL_URI, DEFAULT_RERANK_MODEL_URI, DEFAULT_MODEL_CACHE_DIR } from "./llm.js";
+import { getAuthToken, generateToken, revokeToken, getAuthPath } from "./auth.js";
 import {
   formatSearchResults,
   formatDocuments,
@@ -2435,8 +2436,10 @@ function showHelp(): void {
   console.log("  qmd serve status              - Check if service is running");
   console.log("  qmd serve stop                - Stop the service (will auto-restart)");
   console.log("  qmd serve logs                - Tail recent server logs");
+  console.log("  qmd serve token [generate]    - Generate or view auth token");
+  console.log("  qmd serve token show          - Print full token (for copying to client)");
+  console.log("  qmd serve token revoke        - Remove auth token");
   console.log("  QMD_REMOTE_URL=https://host   - Point client at remote server (no GPU needed)");
-  console.log("  QMD_AUTH_TOKEN=secret          - Optional auth token (set on both sides)");
   console.log("");
   console.log("AI agents & integrations:");
   console.log("  - Run `qmd mcp` to expose the MCP server (stdio) to agents/IDEs.");
@@ -2966,9 +2969,9 @@ if (isMain) {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH || ""}</string>${process.env.QMD_AUTH_TOKEN ? `
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH || ""}</string>${(() => { const t = getAuthToken(); return t ? `
     <key>QMD_AUTH_TOKEN</key>
-    <string>${process.env.QMD_AUTH_TOKEN}</string>` : ""}
+    <string>${t}</string>` : ""; })()}
   </dict>
 </dict>
 </plist>`;
@@ -3016,7 +3019,7 @@ Restart=always
 RestartSec=5
 StandardOutput=append:${serveLogPath}
 StandardError=append:${serveLogPath}
-${process.env.QMD_AUTH_TOKEN ? `Environment=QMD_AUTH_TOKEN=${process.env.QMD_AUTH_TOKEN}` : ""}
+${(() => { const t = getAuthToken(); return t ? `Environment=QMD_AUTH_TOKEN=${t}` : ""; })()}
 
 [Install]
 WantedBy=default.target
@@ -3166,6 +3169,46 @@ WantedBy=default.target
         }
         process.exit(0);
 
+      } else if (serveSub === "token") {
+        const tokenAction = cli.args[1]; // generate | show | revoke | undefined
+
+        if (tokenAction === "generate" || tokenAction === undefined) {
+          const existing = getAuthToken();
+          if (existing && tokenAction !== "generate") {
+            console.log(`${c.bold}Auth token${c.reset}`);
+            console.log(`  Token:  ${existing.slice(0, 8)}${"·".repeat(12)}`);
+            console.log(`  File:   ${getAuthPath()}`);
+            console.log(`\n  Run ${c.cyan}qmd serve token generate${c.reset} to create a new one.`);
+            console.log(`  Run ${c.cyan}qmd serve token show${c.reset} to reveal the full token.`);
+          } else {
+            const token = generateToken();
+            console.log(`${c.green}✓${c.reset} Token generated`);
+            console.log(`\n  Token:  ${c.cyan}${token}${c.reset}`);
+            console.log(`  File:   ${getAuthPath()}`);
+            console.log(`\n  Copy ${c.cyan}${getAuthPath()}${c.reset} to your client machine,`);
+            console.log(`  or set ${c.cyan}QMD_AUTH_TOKEN=${token}${c.reset} in the client environment.`);
+            if (existing) {
+              console.log(`\n  ${c.yellow}⚠ Previous token has been replaced.${c.reset} Restart the service: ${c.cyan}qmd serve stop${c.reset}`);
+            }
+          }
+        } else if (tokenAction === "show") {
+          const token = getAuthToken();
+          if (token) {
+            console.log(token);
+          } else {
+            console.log("No token configured. Run: qmd serve token generate");
+          }
+        } else if (tokenAction === "revoke") {
+          if (revokeToken()) {
+            console.log(`${c.green}✓${c.reset} Token revoked. Server will accept unauthenticated requests after restart.`);
+          } else {
+            console.log("No stored token to revoke.");
+          }
+        } else {
+          console.log("Usage: qmd serve token [generate|show|revoke]");
+        }
+        process.exit(0);
+
       } else {
         // Default: run in foreground
         process.removeAllListeners("SIGTERM");
@@ -3174,7 +3217,6 @@ WantedBy=default.target
         await startRemoteServer({
           port: servePort,
           host: "0.0.0.0",
-          authToken: process.env.QMD_AUTH_TOKEN,
         });
       }
       break;

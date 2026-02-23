@@ -1429,9 +1429,10 @@ export function getDefaultLlamaCpp(): ExtendedLLM {
       // Use createRequire for sync import in ESM context
       const require = createRequire(import.meta.url);
       const { RemoteLLM } = require("./remote-llm.js");
+      const { getAuthToken } = require("./auth.js");
       defaultInstance = new RemoteLLM({
         url: remoteUrl,
-        authToken: process.env.QMD_AUTH_TOKEN,
+        authToken: getAuthToken(),
       }) as ExtendedLLM;
       process.stderr.write(`QMD: using remote inference at ${remoteUrl}\n`);
     } else {
