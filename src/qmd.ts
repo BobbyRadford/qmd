@@ -3009,23 +3009,23 @@ if (isMain) {
 
         } else if (isLinux) {
           // Generate systemd user unit
-          // Capture current PATH so nvm/fnm/asdf node versions are available to systemd
-          const envLines: string[] = [];
-          envLines.push(`Environment=PATH=${process.env.PATH}`);
+          // Use absolute node path to bypass #!/usr/bin/env node shebang issues
+          // (systemd doesn't source shell profiles, so nvm/fnm node isn't on PATH)
+          const selfPath = fileURLToPath(import.meta.url);
+          const execStart = `${process.execPath} ${selfPath}`;
           const authToken = getAuthToken();
-          if (authToken) envLines.push(`Environment=QMD_AUTH_TOKEN=${authToken}`);
           const unitContent = `[Unit]
 Description=QMD Inference Server
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${qmdBin} serve --port ${servePort}
+ExecStart=${execStart} serve --port ${servePort}
 Restart=always
 RestartSec=5
 StandardOutput=append:${serveLogPath}
 StandardError=append:${serveLogPath}
-${envLines.join("\n")}
+${authToken ? `Environment=QMD_AUTH_TOKEN=${authToken}` : ""}
 
 [Install]
 WantedBy=default.target
