@@ -70,7 +70,7 @@ import {
   createStore,
   getDefaultDbPath,
 } from "./store.js";
-import { disposeDefaultLlamaCpp, getDefaultLlamaCpp, withLLMSession, pullModels, DEFAULT_EMBED_MODEL_URI, DEFAULT_GENERATE_MODEL_URI, DEFAULT_RERANK_MODEL_URI, DEFAULT_MODEL_CACHE_DIR } from "./llm.js";
+import { disposeDefaultLlamaCpp, getDefaultLlamaCpp, isRemoteMode, withLLMSession, pullModels, DEFAULT_EMBED_MODEL_URI, DEFAULT_GENERATE_MODEL_URI, DEFAULT_RERANK_MODEL_URI, DEFAULT_MODEL_CACHE_DIR } from "./llm.js";
 import {
   formatSearchResults,
   formatDocuments,
@@ -398,8 +398,12 @@ async function showStatus(): Promise<void> {
   // Device / GPU info
   try {
     const llm = getDefaultLlamaCpp();
+    if (isRemoteMode()) {
+      console.log(`\n${c.bold}Remote Inference${c.reset}`);
+      console.log(`  Server:   ${c.green}${process.env.QMD_REMOTE_URL}${c.reset}`);
+    }
     const device = await llm.getDeviceInfo();
-    console.log(`\n${c.bold}Device${c.reset}`);
+    console.log(`\n${c.bold}Device${c.reset}${isRemoteMode() ? ' (remote)' : ''}`);
     if (device.gpu) {
       console.log(`  GPU:      ${c.green}${device.gpu}${c.reset} (offloading: ${device.gpuOffloading ? 'yes' : 'no'})`);
       if (device.gpuDevices.length > 0) {
@@ -2396,6 +2400,11 @@ function showHelp(): void {
   console.log("    - Query documents allow only lex:, vec:, or hyde: prefixes.");
   console.log("    - Each typed line must be single-line text with balanced quotes.");
   console.log("");
+  console.log("Remote inference:");
+  console.log("  qmd serve [--port 8282]       - Start inference server (run on GPU machine)");
+  console.log("  QMD_REMOTE_URL=https://host   - Point client at remote server (no GPU needed)");
+  console.log("  QMD_AUTH_TOKEN=secret          - Optional auth token (set on both sides)");
+  console.log("");
   console.log("AI agents & integrations:");
   console.log("  - Run `qmd mcp` to expose the MCP server (stdio) to agents/IDEs.");
   console.log("  - `qmd --skill` prints the packaged skills/qmd/SKILL.md (path + contents).");
@@ -2854,6 +2863,20 @@ if (isMain) {
         const { startMcpServer } = await import("./mcp.js");
         await startMcpServer();
       }
+      break;
+    }
+
+    case "serve": {
+      // Remote inference server — run this on the GPU machine
+      process.removeAllListeners("SIGTERM");
+      process.removeAllListeners("SIGINT");
+      const { startRemoteServer } = await import("./remote-server.js");
+      const port = Number(cli.values.port) || 8282;
+      await startRemoteServer({
+        port,
+        host: "0.0.0.0",
+        authToken: process.env.QMD_AUTH_TOKEN,
+      });
       break;
     }
 

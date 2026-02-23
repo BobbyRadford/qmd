@@ -19,6 +19,7 @@ import { realpathSync, statSync, mkdirSync } from "node:fs";
 import {
   LlamaCpp,
   getDefaultLlamaCpp,
+  type ExtendedLLM,
   formatQueryForEmbedding,
   formatDocForEmbedding,
   type RerankDocument,

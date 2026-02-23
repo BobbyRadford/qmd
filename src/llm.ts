@@ -15,6 +15,7 @@ import {
   type LlamaEmbeddingContext,
   type Token as LlamaToken,
 } from "node-llama-cpp";
+import { createRequire } from "module";
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync, mkdirSync, statSync, unlinkSync, readdirSync, readFileSync, writeFileSync } from "fs";
@@ -1168,11 +1169,11 @@ export class LlamaCpp implements LLM {
  * Coordinates with LlamaCpp idle timeout to prevent disposal during active sessions.
  */
 class LLMSessionManager {
-  private llm: LlamaCpp;
+  private llm: ExtendedLLM;
   private _activeSessionCount = 0;
   private _inFlightOperations = 0;
 
-  constructor(llm: LlamaCpp) {
+  constructor(llm: ExtendedLLM) {
     this.llm = llm;
   }
 
@@ -1208,7 +1209,7 @@ class LLMSessionManager {
     this._inFlightOperations = Math.max(0, this._inFlightOperations - 1);
   }
 
-  getLlamaCpp(): LlamaCpp {
+  getLlamaCpp(): ExtendedLLM {
     return this.llm;
   }
 }
@@ -1342,7 +1343,7 @@ let defaultSessionManager: LLMSessionManager | null = null;
  */
 function getSessionManager(): LLMSessionManager {
   const llm = getDefaultLlamaCpp();
-  if (!defaultSessionManager || defaultSessionManager.getLlamaCpp() !== llm) {
+  if (!defaultSessionManager || (defaultSessionManager.getLlamaCpp() as any) !== llm) {
     defaultSessionManager = new LLMSessionManager(llm);
   }
   return defaultSessionManager;
@@ -1386,35 +1387,81 @@ export function canUnloadLLM(): boolean {
 }
 
 // =============================================================================
-// Singleton for default LlamaCpp instance
+// =============================================================================
+// Extended LLM interface (superset of LLM with extra methods used by QMD)
 // =============================================================================
 
-let defaultLlamaCpp: LlamaCpp | null = null;
+/**
+ * Extended LLM interface that includes all methods the QMD codebase calls
+ * directly on the default instance (beyond the base LLM interface).
+ */
+export interface ExtendedLLM extends LLM {
+  embedBatch(texts: string[]): Promise<(EmbeddingResult | null)[]>;
+  tokenize(text: string): Promise<readonly any[]>;
+  countTokens(text: string): Promise<number>;
+  detokenize(tokens: readonly any[]): Promise<string>;
+  getDeviceInfo(): Promise<{
+    gpu: string | false;
+    gpuOffloading: boolean;
+    gpuDevices: string[];
+    vram?: { total: number; used: number; free: number };
+    cpuCores: number;
+  }>;
+  unloadIdleResources(): Promise<void>;
+}
+
+// =============================================================================
+// Singleton for default LLM instance (local or remote)
+// =============================================================================
+
+let defaultInstance: ExtendedLLM | null = null;
 
 /**
- * Get the default LlamaCpp instance (creates one if needed)
+ * Get the default LLM instance.
+ *
+ * If QMD_REMOTE_URL is set, returns a RemoteLLM that proxies inference to
+ * a remote QMD server. Otherwise returns a local LlamaCpp instance.
  */
-export function getDefaultLlamaCpp(): LlamaCpp {
-  if (!defaultLlamaCpp) {
-    defaultLlamaCpp = new LlamaCpp();
+export function getDefaultLlamaCpp(): ExtendedLLM {
+  if (!defaultInstance) {
+    const remoteUrl = process.env.QMD_REMOTE_URL;
+    if (remoteUrl) {
+      // Use createRequire for sync import in ESM context
+      const require = createRequire(import.meta.url);
+      const { RemoteLLM } = require("./remote-llm.js");
+      defaultInstance = new RemoteLLM({
+        url: remoteUrl,
+        authToken: process.env.QMD_AUTH_TOKEN,
+      }) as ExtendedLLM;
+      process.stderr.write(`QMD: using remote inference at ${remoteUrl}\n`);
+    } else {
+      defaultInstance = new LlamaCpp();
+    }
   }
-  return defaultLlamaCpp;
+  return defaultInstance;
 }
 
 /**
- * Set a custom default LlamaCpp instance (useful for testing)
+ * Check if the current default instance is a remote connection.
  */
-export function setDefaultLlamaCpp(llm: LlamaCpp | null): void {
-  defaultLlamaCpp = llm;
+export function isRemoteMode(): boolean {
+  return !!process.env.QMD_REMOTE_URL;
 }
 
 /**
- * Dispose the default LlamaCpp instance if it exists.
+ * Set a custom default instance (useful for testing)
+ */
+export function setDefaultLlamaCpp(llm: ExtendedLLM | null): void {
+  defaultInstance = llm;
+}
+
+/**
+ * Dispose the default instance if it exists.
  * Call this before process exit to prevent NAPI crashes.
  */
 export async function disposeDefaultLlamaCpp(): Promise<void> {
-  if (defaultLlamaCpp) {
-    await defaultLlamaCpp.dispose();
-    defaultLlamaCpp = null;
+  if (defaultInstance) {
+    await defaultInstance.dispose();
+    defaultInstance = null;
   }
 }
