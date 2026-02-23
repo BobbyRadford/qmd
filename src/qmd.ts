@@ -2428,8 +2428,13 @@ function showHelp(): void {
   console.log("    - Query documents allow only lex:, vec:, or hyde: prefixes.");
   console.log("    - Each typed line must be single-line text with balanced quotes.");
   console.log("");
-  console.log("Remote inference:");
-  console.log("  qmd serve [--port 8282]       - Start inference server (run on GPU machine)");
+  console.log("Remote inference (run on GPU machine):");
+  console.log("  qmd serve [--port 8282]       - Start inference server in foreground");
+  console.log("  qmd serve install [--port N]  - Install as system service (auto-start on login)");
+  console.log("  qmd serve uninstall           - Remove the system service");
+  console.log("  qmd serve status              - Check if service is running");
+  console.log("  qmd serve stop                - Stop the service (will auto-restart)");
+  console.log("  qmd serve logs                - Tail recent server logs");
   console.log("  QMD_REMOTE_URL=https://host   - Point client at remote server (no GPU needed)");
   console.log("  QMD_AUTH_TOKEN=secret          - Optional auth token (set on both sides)");
   console.log("");
@@ -2895,16 +2900,283 @@ if (isMain) {
     }
 
     case "serve": {
-      // Remote inference server — run this on the GPU machine
-      process.removeAllListeners("SIGTERM");
-      process.removeAllListeners("SIGINT");
-      const { startRemoteServer } = await import("./remote-server.js");
-      const port = Number(cli.values.port) || 8282;
-      await startRemoteServer({
-        port,
-        host: "0.0.0.0",
-        authToken: process.env.QMD_AUTH_TOKEN,
-      });
+      const serveSub = cli.args[0]; // install | uninstall | status | stop | logs | undefined
+      const servePort = Number(cli.values.port) || 8282;
+
+      // Cache dir for PID/log files
+      const serveCacheDir = process.env.XDG_CACHE_HOME
+        ? resolve(process.env.XDG_CACHE_HOME, "qmd")
+        : resolve(homedir(), ".cache", "qmd");
+      mkdirSync(serveCacheDir, { recursive: true });
+      const serveLogPath = resolve(serveCacheDir, "serve.log");
+      const servePidPath = resolve(serveCacheDir, "serve.pid");
+
+      // Platform-specific service paths
+      const isMac = process.platform === "darwin";
+      const isLinux = process.platform === "linux";
+      const plistLabel = "com.qmd.serve";
+      const plistPath = isMac
+        ? resolve(homedir(), "Library", "LaunchAgents", `${plistLabel}.plist`)
+        : "";
+      const systemdDir = isLinux
+        ? resolve(homedir(), ".config", "systemd", "user")
+        : "";
+      const systemdUnit = isLinux
+        ? resolve(systemdDir, "qmd-serve.service")
+        : "";
+
+      // Resolve the qmd binary path for service definitions
+      const qmdBin = (() => {
+        // If running from dist/qmd.js, use the installed binary
+        const selfPath = fileURLToPath(import.meta.url);
+        if (selfPath.endsWith("/qmd.js") || selfPath.endsWith("/qmd.ts")) {
+          // Try to find the linked/installed binary
+          try {
+            const which = execSync("which qmd", { encoding: "utf-8" }).trim();
+            if (which) return which;
+          } catch { /* fall through */ }
+        }
+        return `${process.execPath} ${selfPath}`;
+      })();
+
+      if (serveSub === "install") {
+        if (isMac) {
+          // Generate launchd plist
+          const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${plistLabel}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${qmdBin.split(" ")[0]}</string>${qmdBin.includes(" ") ? `\n    <string>${qmdBin.split(" ").slice(1).join("</string>\n    <string>")}</string>` : ""}
+    <string>serve</string>
+    <string>--port</string>
+    <string>${servePort}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${serveLogPath}</string>
+  <key>StandardErrorPath</key>
+  <string>${serveLogPath}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH || ""}</string>${process.env.QMD_AUTH_TOKEN ? `
+    <key>QMD_AUTH_TOKEN</key>
+    <string>${process.env.QMD_AUTH_TOKEN}</string>` : ""}
+  </dict>
+</dict>
+</plist>`;
+
+          const agentsDir = resolve(homedir(), "Library", "LaunchAgents");
+          mkdirSync(agentsDir, { recursive: true });
+
+          // Stop existing service if running
+          try {
+            execSync(`launchctl bootout gui/$(id -u) ${plistPath} 2>/dev/null`, { stdio: "ignore" });
+          } catch { /* not loaded */ }
+
+          writeFileSync(plistPath, plistContent);
+          console.log(`${c.green}✓${c.reset} Wrote ${plistPath}`);
+
+          try {
+            execSync(`launchctl bootstrap gui/$(id -u) ${plistPath}`, { stdio: "inherit" });
+            console.log(`${c.green}✓${c.reset} Service installed and started`);
+          } catch {
+            // Fallback for older macOS
+            try {
+              execSync(`launchctl load ${plistPath}`, { stdio: "inherit" });
+              console.log(`${c.green}✓${c.reset} Service installed and started`);
+            } catch (e: any) {
+              console.error(`${c.yellow}✗${c.reset} Failed to load service: ${e.message}`);
+              process.exit(1);
+            }
+          }
+
+          console.log(`\n  Port:  ${servePort}`);
+          console.log(`  Logs:  ${serveLogPath}`);
+          console.log(`\n  The server will start automatically on login.`);
+          console.log(`  Run ${c.cyan}qmd serve status${c.reset} to check, ${c.cyan}qmd serve uninstall${c.reset} to remove.`);
+
+        } else if (isLinux) {
+          // Generate systemd user unit
+          const unitContent = `[Unit]
+Description=QMD Inference Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${qmdBin} serve --port ${servePort}
+Restart=always
+RestartSec=5
+StandardOutput=append:${serveLogPath}
+StandardError=append:${serveLogPath}
+${process.env.QMD_AUTH_TOKEN ? `Environment=QMD_AUTH_TOKEN=${process.env.QMD_AUTH_TOKEN}` : ""}
+
+[Install]
+WantedBy=default.target
+`;
+
+          mkdirSync(systemdDir, { recursive: true });
+          writeFileSync(systemdUnit, unitContent);
+          console.log(`${c.green}✓${c.reset} Wrote ${systemdUnit}`);
+
+          try {
+            execSync("systemctl --user daemon-reload", { stdio: "inherit" });
+            execSync("systemctl --user enable --now qmd-serve", { stdio: "inherit" });
+            console.log(`${c.green}✓${c.reset} Service installed and started`);
+          } catch (e: any) {
+            console.error(`${c.yellow}✗${c.reset} Failed to start service: ${e.message}`);
+            process.exit(1);
+          }
+
+          console.log(`\n  Port:  ${servePort}`);
+          console.log(`  Logs:  ${serveLogPath}`);
+          console.log(`\n  Run ${c.cyan}qmd serve status${c.reset} to check, ${c.cyan}qmd serve uninstall${c.reset} to remove.`);
+
+        } else {
+          console.error("Service install is only supported on macOS and Linux.");
+          process.exit(1);
+        }
+        process.exit(0);
+
+      } else if (serveSub === "uninstall") {
+        if (isMac && existsSync(plistPath)) {
+          try {
+            execSync(`launchctl bootout gui/$(id -u) ${plistPath} 2>/dev/null`, { stdio: "ignore" });
+          } catch {
+            try { execSync(`launchctl unload ${plistPath}`, { stdio: "ignore" }); } catch { /* */ }
+          }
+          unlinkSync(plistPath);
+          console.log(`${c.green}✓${c.reset} Service uninstalled`);
+        } else if (isLinux && existsSync(systemdUnit)) {
+          try {
+            execSync("systemctl --user disable --now qmd-serve", { stdio: "inherit" });
+          } catch { /* */ }
+          unlinkSync(systemdUnit);
+          execSync("systemctl --user daemon-reload", { stdio: "ignore" });
+          console.log(`${c.green}✓${c.reset} Service uninstalled`);
+        } else {
+          console.log("No service installed.");
+        }
+        process.exit(0);
+
+      } else if (serveSub === "status") {
+        let running = false;
+
+        if (isMac) {
+          try {
+            const out = execSync(`launchctl print gui/$(id -u)/${plistLabel} 2>/dev/null`, { encoding: "utf-8" });
+            const pidMatch = out.match(/pid\s*=\s*(\d+)/i);
+            if (pidMatch) {
+              console.log(`${c.green}●${c.reset} QMD serve is ${c.green}running${c.reset} (PID ${pidMatch[1]})`);
+              running = true;
+            } else if (out.includes("state = running")) {
+              console.log(`${c.green}●${c.reset} QMD serve is ${c.green}running${c.reset}`);
+              running = true;
+            } else {
+              console.log(`${c.yellow}●${c.reset} QMD serve is ${c.yellow}stopped${c.reset}`);
+            }
+          } catch {
+            if (existsSync(plistPath)) {
+              console.log(`${c.yellow}●${c.reset} QMD serve is ${c.yellow}installed but not loaded${c.reset}`);
+            } else {
+              console.log(`${c.dim}●${c.reset} QMD serve is ${c.dim}not installed${c.reset}`);
+              console.log(`  Run ${c.cyan}qmd serve install${c.reset} to set up as a service.`);
+            }
+          }
+        } else if (isLinux) {
+          try {
+            const out = execSync("systemctl --user is-active qmd-serve 2>/dev/null", { encoding: "utf-8" }).trim();
+            if (out === "active") {
+              const statusOut = execSync("systemctl --user show qmd-serve --property=MainPID", { encoding: "utf-8" }).trim();
+              const pid = statusOut.split("=")[1];
+              console.log(`${c.green}●${c.reset} QMD serve is ${c.green}running${c.reset} (PID ${pid})`);
+              running = true;
+            } else {
+              console.log(`${c.yellow}●${c.reset} QMD serve is ${c.yellow}${out}${c.reset}`);
+            }
+          } catch {
+            if (existsSync(systemdUnit)) {
+              console.log(`${c.yellow}●${c.reset} QMD serve is ${c.yellow}installed but not running${c.reset}`);
+            } else {
+              console.log(`${c.dim}●${c.reset} QMD serve is ${c.dim}not installed${c.reset}`);
+              console.log(`  Run ${c.cyan}qmd serve install${c.reset} to set up as a service.`);
+            }
+          }
+        }
+
+        // Health check if running
+        if (running) {
+          try {
+            const resp = await fetch(`http://localhost:${servePort}/health`, {
+              signal: AbortSignal.timeout(3000),
+            });
+            if (resp.ok) {
+              const data = await resp.json() as { status: string; uptime: number };
+              const hours = Math.floor(data.uptime / 3600);
+              const mins = Math.floor((data.uptime % 3600) / 60);
+              const uptimeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+              console.log(`  Health:  ${c.green}ok${c.reset} (uptime: ${uptimeStr})`);
+            }
+          } catch {
+            console.log(`  Health:  ${c.yellow}not responding on port ${servePort}${c.reset}`);
+          }
+        }
+
+        console.log(`  Port:    ${servePort}`);
+        console.log(`  Logs:    ${serveLogPath}`);
+        process.exit(0);
+
+      } else if (serveSub === "stop") {
+        if (isMac) {
+          try {
+            execSync(`launchctl kill SIGTERM gui/$(id -u)/${plistLabel}`, { stdio: "ignore" });
+            console.log(`${c.green}✓${c.reset} Sent stop signal (KeepAlive will restart it — use ${c.cyan}qmd serve uninstall${c.reset} to fully stop)`);
+          } catch {
+            console.log("Service not running.");
+          }
+        } else if (isLinux) {
+          try {
+            execSync("systemctl --user stop qmd-serve", { stdio: "inherit" });
+            console.log(`${c.green}✓${c.reset} Stopped (will restart on next boot — use ${c.cyan}qmd serve uninstall${c.reset} to fully disable)`);
+          } catch {
+            console.log("Service not running.");
+          }
+        }
+        process.exit(0);
+
+      } else if (serveSub === "logs") {
+        if (existsSync(serveLogPath)) {
+          // Tail last 50 lines
+          try {
+            const out = execSync(`tail -50 ${serveLogPath}`, { encoding: "utf-8" });
+            console.log(out);
+            console.log(`${c.dim}Full log: ${serveLogPath}${c.reset}`);
+          } catch {
+            console.log(`Log file: ${serveLogPath}`);
+          }
+        } else {
+          console.log("No log file yet. Start the server first.");
+        }
+        process.exit(0);
+
+      } else {
+        // Default: run in foreground
+        process.removeAllListeners("SIGTERM");
+        process.removeAllListeners("SIGINT");
+        const { startRemoteServer } = await import("./remote-server.js");
+        await startRemoteServer({
+          port: servePort,
+          host: "0.0.0.0",
+          authToken: process.env.QMD_AUTH_TOKEN,
+        });
+      }
       break;
     }
 
