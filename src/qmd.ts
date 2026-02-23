@@ -3009,6 +3009,11 @@ if (isMain) {
 
         } else if (isLinux) {
           // Generate systemd user unit
+          // Capture current PATH so nvm/fnm/asdf node versions are available to systemd
+          const envLines: string[] = [];
+          envLines.push(`Environment=PATH=${process.env.PATH}`);
+          const authToken = getAuthToken();
+          if (authToken) envLines.push(`Environment=QMD_AUTH_TOKEN=${authToken}`);
           const unitContent = `[Unit]
 Description=QMD Inference Server
 After=network.target
@@ -3020,7 +3025,7 @@ Restart=always
 RestartSec=5
 StandardOutput=append:${serveLogPath}
 StandardError=append:${serveLogPath}
-${(() => { const t = getAuthToken(); return t ? `Environment=QMD_AUTH_TOKEN=${t}` : ""; })()}
+${envLines.join("\n")}
 
 [Install]
 WantedBy=default.target
