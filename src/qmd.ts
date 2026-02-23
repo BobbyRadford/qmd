@@ -2915,7 +2915,7 @@ if (isMain) {
       process.exit(1);
   }
 
-  if (cli.command !== "mcp") {
+  if (cli.command !== "mcp" && cli.command !== "serve") {
     await disposeDefaultLlamaCpp();
     process.exit(0);
   }
