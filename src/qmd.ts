@@ -2430,8 +2430,9 @@ function showHelp(): void {
   console.log("    - Each typed line must be single-line text with balanced quotes.");
   console.log("");
   console.log("Remote inference (run on GPU machine):");
-  console.log("  qmd service [--port 8282]       - Start inference server in foreground");
+  console.log("  qmd service                     - Show service subcommands");
   console.log("  qmd service install [--port N]  - Install as system service (auto-start on login)");
+  console.log("  qmd service run [--port 8282]   - Start inference server in foreground");
   console.log("  qmd service uninstall           - Remove the system service");
   console.log("  qmd service status              - Check if service is running");
   console.log("  qmd service stop                - Stop the service (will auto-restart)");
@@ -3209,8 +3210,8 @@ WantedBy=default.target
         }
         process.exit(0);
 
-      } else {
-        // Default: run in foreground
+      } else if (serveSub === "run") {
+        // Explicit foreground mode
         process.removeAllListeners("SIGTERM");
         process.removeAllListeners("SIGINT");
         const { startRemoteServer } = await import("./remote-server.js");
@@ -3218,6 +3219,20 @@ WantedBy=default.target
           port: servePort,
           host: "0.0.0.0",
         });
+      } else {
+        console.log(`${c.bold}QMD Service${c.reset} — remote inference server\n`);
+        console.log("Commands:");
+        console.log(`  ${c.cyan}qmd service install${c.reset} [--port N]  Install and start as system service`);
+        console.log(`  ${c.cyan}qmd service uninstall${c.reset}           Remove the system service`);
+        console.log(`  ${c.cyan}qmd service status${c.reset}              Check if service is running`);
+        console.log(`  ${c.cyan}qmd service stop${c.reset}                Stop the service`);
+        console.log(`  ${c.cyan}qmd service logs${c.reset}                Tail recent server logs`);
+        console.log(`  ${c.cyan}qmd service run${c.reset} [--port N]      Run server in foreground`);
+        console.log(`  ${c.cyan}qmd service token${c.reset}               View or generate auth token`);
+        console.log(`  ${c.cyan}qmd service token generate${c.reset}      Create a new auth token`);
+        console.log(`  ${c.cyan}qmd service token show${c.reset}          Print full token`);
+        console.log(`  ${c.cyan}qmd service token revoke${c.reset}        Remove auth token`);
+        process.exit(0);
       }
       break;
     }
