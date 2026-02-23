@@ -2430,15 +2430,15 @@ function showHelp(): void {
   console.log("    - Each typed line must be single-line text with balanced quotes.");
   console.log("");
   console.log("Remote inference (run on GPU machine):");
-  console.log("  qmd serve [--port 8282]       - Start inference server in foreground");
-  console.log("  qmd serve install [--port N]  - Install as system service (auto-start on login)");
-  console.log("  qmd serve uninstall           - Remove the system service");
-  console.log("  qmd serve status              - Check if service is running");
-  console.log("  qmd serve stop                - Stop the service (will auto-restart)");
-  console.log("  qmd serve logs                - Tail recent server logs");
-  console.log("  qmd serve token [generate]    - Generate or view auth token");
-  console.log("  qmd serve token show          - Print full token (for copying to client)");
-  console.log("  qmd serve token revoke        - Remove auth token");
+  console.log("  qmd service [--port 8282]       - Start inference server in foreground");
+  console.log("  qmd service install [--port N]  - Install as system service (auto-start on login)");
+  console.log("  qmd service uninstall           - Remove the system service");
+  console.log("  qmd service status              - Check if service is running");
+  console.log("  qmd service stop                - Stop the service (will auto-restart)");
+  console.log("  qmd service logs                - Tail recent server logs");
+  console.log("  qmd service token [generate]    - Generate or view auth token");
+  console.log("  qmd service token show          - Print full token (for copying to client)");
+  console.log("  qmd service token revoke        - Remove auth token");
   console.log("  QMD_REMOTE_URL=https://host   - Point client at remote server (no GPU needed)");
   console.log("");
   console.log("AI agents & integrations:");
@@ -2902,7 +2902,7 @@ if (isMain) {
       break;
     }
 
-    case "serve": {
+    case "service": {
       const serveSub = cli.args[0]; // install | uninstall | status | stop | logs | undefined
       const servePort = Number(cli.values.port) || 8282;
 
@@ -3004,7 +3004,7 @@ if (isMain) {
           console.log(`\n  Port:  ${servePort}`);
           console.log(`  Logs:  ${serveLogPath}`);
           console.log(`\n  The server will start automatically on login.`);
-          console.log(`  Run ${c.cyan}qmd serve status${c.reset} to check, ${c.cyan}qmd serve uninstall${c.reset} to remove.`);
+          console.log(`  Run ${c.cyan}qmd service status${c.reset} to check, ${c.cyan}qmd service uninstall${c.reset} to remove.`);
 
         } else if (isLinux) {
           // Generate systemd user unit
@@ -3040,7 +3040,7 @@ WantedBy=default.target
 
           console.log(`\n  Port:  ${servePort}`);
           console.log(`  Logs:  ${serveLogPath}`);
-          console.log(`\n  Run ${c.cyan}qmd serve status${c.reset} to check, ${c.cyan}qmd serve uninstall${c.reset} to remove.`);
+          console.log(`\n  Run ${c.cyan}qmd service status${c.reset} to check, ${c.cyan}qmd service uninstall${c.reset} to remove.`);
 
         } else {
           console.error("Service install is only supported on macOS and Linux.");
@@ -3077,20 +3077,20 @@ WantedBy=default.target
             const out = execSync(`launchctl print gui/$(id -u)/${plistLabel} 2>/dev/null`, { encoding: "utf-8" });
             const pidMatch = out.match(/pid\s*=\s*(\d+)/i);
             if (pidMatch) {
-              console.log(`${c.green}●${c.reset} QMD serve is ${c.green}running${c.reset} (PID ${pidMatch[1]})`);
+              console.log(`${c.green}●${c.reset} QMD service is ${c.green}running${c.reset} (PID ${pidMatch[1]})`);
               running = true;
             } else if (out.includes("state = running")) {
-              console.log(`${c.green}●${c.reset} QMD serve is ${c.green}running${c.reset}`);
+              console.log(`${c.green}●${c.reset} QMD service is ${c.green}running${c.reset}`);
               running = true;
             } else {
-              console.log(`${c.yellow}●${c.reset} QMD serve is ${c.yellow}stopped${c.reset}`);
+              console.log(`${c.yellow}●${c.reset} QMD service is ${c.yellow}stopped${c.reset}`);
             }
           } catch {
             if (existsSync(plistPath)) {
-              console.log(`${c.yellow}●${c.reset} QMD serve is ${c.yellow}installed but not loaded${c.reset}`);
+              console.log(`${c.yellow}●${c.reset} QMD service is ${c.yellow}installed but not loaded${c.reset}`);
             } else {
-              console.log(`${c.dim}●${c.reset} QMD serve is ${c.dim}not installed${c.reset}`);
-              console.log(`  Run ${c.cyan}qmd serve install${c.reset} to set up as a service.`);
+              console.log(`${c.dim}●${c.reset} QMD service is ${c.dim}not installed${c.reset}`);
+              console.log(`  Run ${c.cyan}qmd service install${c.reset} to set up as a service.`);
             }
           }
         } else if (isLinux) {
@@ -3099,17 +3099,17 @@ WantedBy=default.target
             if (out === "active") {
               const statusOut = execSync("systemctl --user show qmd-serve --property=MainPID", { encoding: "utf-8" }).trim();
               const pid = statusOut.split("=")[1];
-              console.log(`${c.green}●${c.reset} QMD serve is ${c.green}running${c.reset} (PID ${pid})`);
+              console.log(`${c.green}●${c.reset} QMD service is ${c.green}running${c.reset} (PID ${pid})`);
               running = true;
             } else {
-              console.log(`${c.yellow}●${c.reset} QMD serve is ${c.yellow}${out}${c.reset}`);
+              console.log(`${c.yellow}●${c.reset} QMD service is ${c.yellow}${out}${c.reset}`);
             }
           } catch {
             if (existsSync(systemdUnit)) {
-              console.log(`${c.yellow}●${c.reset} QMD serve is ${c.yellow}installed but not running${c.reset}`);
+              console.log(`${c.yellow}●${c.reset} QMD service is ${c.yellow}installed but not running${c.reset}`);
             } else {
-              console.log(`${c.dim}●${c.reset} QMD serve is ${c.dim}not installed${c.reset}`);
-              console.log(`  Run ${c.cyan}qmd serve install${c.reset} to set up as a service.`);
+              console.log(`${c.dim}●${c.reset} QMD service is ${c.dim}not installed${c.reset}`);
+              console.log(`  Run ${c.cyan}qmd service install${c.reset} to set up as a service.`);
             }
           }
         }
@@ -3140,14 +3140,14 @@ WantedBy=default.target
         if (isMac) {
           try {
             execSync(`launchctl kill SIGTERM gui/$(id -u)/${plistLabel}`, { stdio: "ignore" });
-            console.log(`${c.green}✓${c.reset} Sent stop signal (KeepAlive will restart it — use ${c.cyan}qmd serve uninstall${c.reset} to fully stop)`);
+            console.log(`${c.green}✓${c.reset} Sent stop signal (KeepAlive will restart it — use ${c.cyan}qmd service uninstall${c.reset} to fully stop)`);
           } catch {
             console.log("Service not running.");
           }
         } else if (isLinux) {
           try {
             execSync("systemctl --user stop qmd-serve", { stdio: "inherit" });
-            console.log(`${c.green}✓${c.reset} Stopped (will restart on next boot — use ${c.cyan}qmd serve uninstall${c.reset} to fully disable)`);
+            console.log(`${c.green}✓${c.reset} Stopped (will restart on next boot — use ${c.cyan}qmd service uninstall${c.reset} to fully disable)`);
           } catch {
             console.log("Service not running.");
           }
@@ -3178,8 +3178,8 @@ WantedBy=default.target
             console.log(`${c.bold}Auth token${c.reset}`);
             console.log(`  Token:  ${existing.slice(0, 8)}${"·".repeat(12)}`);
             console.log(`  File:   ${getAuthPath()}`);
-            console.log(`\n  Run ${c.cyan}qmd serve token generate${c.reset} to create a new one.`);
-            console.log(`  Run ${c.cyan}qmd serve token show${c.reset} to reveal the full token.`);
+            console.log(`\n  Run ${c.cyan}qmd service token generate${c.reset} to create a new one.`);
+            console.log(`  Run ${c.cyan}qmd service token show${c.reset} to reveal the full token.`);
           } else {
             const token = generateToken();
             console.log(`${c.green}✓${c.reset} Token generated`);
@@ -3188,7 +3188,7 @@ WantedBy=default.target
             console.log(`\n  Copy ${c.cyan}${getAuthPath()}${c.reset} to your client machine,`);
             console.log(`  or set ${c.cyan}QMD_AUTH_TOKEN=${token}${c.reset} in the client environment.`);
             if (existing) {
-              console.log(`\n  ${c.yellow}⚠ Previous token has been replaced.${c.reset} Restart the service: ${c.cyan}qmd serve stop${c.reset}`);
+              console.log(`\n  ${c.yellow}⚠ Previous token has been replaced.${c.reset} Restart the service: ${c.cyan}qmd service stop${c.reset}`);
             }
           }
         } else if (tokenAction === "show") {
@@ -3196,7 +3196,7 @@ WantedBy=default.target
           if (token) {
             console.log(token);
           } else {
-            console.log("No token configured. Run: qmd serve token generate");
+            console.log("No token configured. Run: qmd service token generate");
           }
         } else if (tokenAction === "revoke") {
           if (revokeToken()) {
@@ -3205,7 +3205,7 @@ WantedBy=default.target
             console.log("No stored token to revoke.");
           }
         } else {
-          console.log("Usage: qmd serve token [generate|show|revoke]");
+          console.log("Usage: qmd service token [generate|show|revoke]");
         }
         process.exit(0);
 
@@ -3257,7 +3257,7 @@ WantedBy=default.target
       process.exit(1);
   }
 
-  if (cli.command !== "mcp" && cli.command !== "serve") {
+  if (cli.command !== "mcp" && cli.command !== "service") {
     await disposeDefaultLlamaCpp();
     process.exit(0);
   }

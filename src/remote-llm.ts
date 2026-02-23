@@ -2,7 +2,7 @@
  * remote-llm.ts - Remote LLM client for QMD
  *
  * Implements the same LlamaCpp interface but proxies all inference to a remote
- * QMD server (started with `qmd serve`). This allows machines without a GPU
+ * QMD server (started with `qmd service`). This allows machines without a GPU
  * to use QMD's full hybrid search pipeline.
  *
  * Configure via environment:

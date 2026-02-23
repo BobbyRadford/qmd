@@ -5,7 +5,7 @@
  * It loads GGUF models via node-llama-cpp and exposes them over HTTP.
  *
  * Usage:
- *   qmd serve [--port 8282] [--host 0.0.0.0]
+ *   qmd service [--port 8282] [--host 0.0.0.0]
  *
  * Then point the client machine at it:
  *   QMD_REMOTE_URL=https://mbp.example.com qmd query "my search"
