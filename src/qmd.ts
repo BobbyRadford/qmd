@@ -2955,7 +2955,8 @@ if (isMain) {
   <key>ProgramArguments</key>
   <array>
     <string>${qmdBin.split(" ")[0]}</string>${qmdBin.includes(" ") ? `\n    <string>${qmdBin.split(" ").slice(1).join("</string>\n    <string>")}</string>` : ""}
-    <string>serve</string>
+    <string>service</string>
+    <string>run</string>
     <string>--port</string>
     <string>${servePort}</string>
   </array>
@@ -3020,7 +3021,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${execStart} serve --port ${servePort}
+ExecStart=${execStart} service run --port ${servePort}
 Restart=always
 RestartSec=5
 StandardOutput=append:${serveLogPath}
